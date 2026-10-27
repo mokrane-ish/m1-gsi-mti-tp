@@ -1,0 +1,17 @@
+semestre;unite;unite_title;module_name;module_title;coef;credit;percent_tp;percent_td;percent_exam
+S1;U1_S1;Fondamentale1;RCB;Réseaux des couches basses;3;6;20;20;60
+S1;U1_S1;Fondamentale1;AlgoAv;Algorithmique Avancée et Complexité;2;4;40;0;60
+S1;U2_S1;Fondamentale2;SE;Système d'exploitation;2;4;0;40;60
+S1;U2_S1;Fondamentale2;AMSI;Architectures Modernes des Systèmes Informatiques;2;4;40;0;60
+S1;U3_S1;Méthodologie;AABD;Architecture et administration des bases de données;2;4;40;0;60
+S1;U3_S1;Méthodologie;MTI;Méthodes et Technologies d'Implémentation;3;5;40;0;60
+S1;U4_S1;Découverte;scvv;Systèmes de Communication Vocaux et Vidéos;2;2;40;0;60
+S1;U5_S1;Transversale;cloud;Cloud Computing;1;1;0;0;100
+S2;U1_S2;Fondamentale1;Middleware;Les Middlewares pour les systèmes répartis;3;6;20;20;60
+S2;U1_S2;Fondamentale1;MAL;Modélisation et Architectures logicielles;2;4;40;0;60
+S2;U2_S2;Fondamentale2;ResIP;Réseaux de la couche IP;3;6;40;0;60
+S2;U2_S2;Fondamentale2;ML;Introduction au Machine Learning;2;4;40;0;60
+S2;U3_S2;Méthodologique;Infog;Infographie;2;3;40;0;60
+S2;U3_S2;Méthodologique;GI;Gestion de l'incertain;2;3;0;40;60
+S2;U4_S2;Découverte;IoT;Internet of Things;2;3;40;0;60
+S2;U4_S2;Transversale;Sec;Cybercriminalité;1;1;0;0;100
