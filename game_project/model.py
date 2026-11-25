@@ -237,7 +237,7 @@ class Monster:
             self.is_alive = False
             self.death_timer = self.DEATH_LINGER_FRAMES
 
-    def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list, player: Player = None):
         """Polymorphic update hook safe for any Monster subtype (LSP)."""
         pass
 
@@ -258,7 +258,7 @@ class NormalMonster(Monster, Movable):
         if self.rect.right >= screen_width or self.rect.left <= 0:
             self.speed_x *= -1
 
-    def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list, player: Player = None):
         if self.is_alive:
             self.move(screen_width)
 
@@ -276,7 +276,7 @@ class FastMonster(Monster, Movable):
         if self.rect.right >= screen_width or self.rect.left <= 0:
             self.speed_x *= -1
 
-    def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list, player: Player = None):
         if self.is_alive:
             self.move(screen_width)
 
@@ -301,7 +301,7 @@ class FlyingMonster(Monster, Movable, Flyable):
         new_y = int(self.base_y + math.sin(self.flight_tick) * 35)
         self.rect.y = max(30, min(screen_height // 2, new_y))
 
-    def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list, player: Player = None):
         if self.is_alive:
             self.move(screen_width)
             self.fly(screen_height)
@@ -327,7 +327,7 @@ class StrongMonster(Monster, Movable, Shieldable):
     def has_active_shield(self) -> bool:
         return self.shield_active
 
-    def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list, player: Player = None):
         if self.is_alive:
             self.activate_shield()
             self.move(screen_width)
@@ -361,7 +361,7 @@ class ShooterMonster(Monster, Movable, Shootable):
             enemy_bullets.append(EnemyBullet(self.rect.centerx, self.rect.bottom))
             self.shoot_cooldown = 110
 
-    def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list, player: Player = None):
         if self.is_alive:
             self.move(screen_width)
             self.shoot(enemy_bullets)
@@ -476,7 +476,7 @@ class ChickenMonster(Monster, Movable, Shootable):
             enemy_bullets.append(EnemyBullet(self.rect.centerx, self.rect.bottom, kind="egg"))
             self.throw_cooldown = 100
 
-    def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list, player: Player = None):
         if self.is_alive:
             self.move(screen_width)
             self.shoot(enemy_bullets)
@@ -674,10 +674,7 @@ class GameWorld:
         enemy_bullets_before = len(self.enemy_bullets)
         for monster in self.monsters:
             if monster.is_alive:
-                if isinstance(monster, ZombieMonster):
-                    monster.update(self.width, self.height, self.enemy_bullets, self.player)
-                else:
-                    monster.update(self.width, self.height, self.enemy_bullets)
+                monster.update(self.width, self.height, self.enemy_bullets, self.player)
             elif monster.death_timer > 0:
                 monster.death_timer -= 1
 
