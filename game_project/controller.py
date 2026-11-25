@@ -21,7 +21,7 @@ class GameController:
         self.width = width
         self.height = height
         self.screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption("M1 GSI - 2D Game OOP (MVC Refactor)")
+        pygame.display.set_caption("M1 GSI - 2D Game OOP (Factory Method / Abstract Factory / Builder)")
         self.clock = pygame.time.Clock()
         self.running = True
 
@@ -34,14 +34,23 @@ class GameController:
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_r and self.world.status == "game_over":
+                if self.world.status == "menu":
+                    if event.key == pygame.K_1:
+                        self.world.set_world("forest")
+                    elif event.key == pygame.K_2:
+                        self.world.set_world("graveyard")
+                    elif event.key == pygame.K_3:
+                        self.world.set_world("classic")
+                    elif event.key == pygame.K_ESCAPE:
+                        self.running = False
+                elif event.key == pygame.K_r and self.world.status == "game_over":
                     self.world.reset()
-
-        player = self.world.player
-        player.tick_cooldown()
 
         if self.world.status != "playing":
             return
+
+        player = self.world.player
+        player.tick_cooldown()
 
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
@@ -63,7 +72,10 @@ class GameController:
         self.view.play_event_sounds(events)
 
     def draw(self):
-        self.view.draw(self.world)
+        if self.world.status == "menu":
+            self.view.draw_world_selection()
+        else:
+            self.view.draw(self.world)
 
     def run(self):
         while self.running:

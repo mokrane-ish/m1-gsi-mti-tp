@@ -8,6 +8,7 @@ thing borrowed from pygame is pygame.Rect, used purely as a small
 x/y/width/height box for collision math (colliderect), not for drawing.
 """
 import math
+import random
 from abc import ABC, abstractmethod
 import pygame
 
@@ -115,13 +116,25 @@ class Bullet:
 
 
 class EnemyBullet:
-    """A projectile fired downward by a Shootable monster. Pure state."""
+    """A projectile fired downward by a Shootable monster. Pure state.
+
+    `kind` lets the View pick the right sprite ("egg" for the Chicken's
+    thrown egg, or a plain shape for anything else) without this class
+    needing to know what an image is.
+    """
 
     WIDTH = 10
     HEIGHT = 20
+    EGG_WIDTH = 22
+    EGG_HEIGHT = 28
 
-    def __init__(self, x: int, y: int):
-        self.rect = pygame.Rect(x - self.WIDTH // 2, y, self.WIDTH, self.HEIGHT)
+    def __init__(self, x: int, y: int, kind: str = "generic"):
+        self.kind = kind
+        if kind == "egg":
+            w, h = self.EGG_WIDTH, self.EGG_HEIGHT
+        else:
+            w, h = self.WIDTH, self.HEIGHT
+        self.rect = pygame.Rect(x - w // 2, y, w, h)
         self.speed = 5
         self.is_active = True
 
@@ -193,6 +206,10 @@ class Monster:
 
     WIDTH = 75
     HEIGHT = 75
+    # How many frames a dead monster stays in world.monsters (and thus
+    # visible) after dying. 0 = vanish immediately (old TP3 behaviour).
+    # ChickenMonster raises this so the View has time to show chicken-die.png.
+    DEATH_LINGER_FRAMES = 0
 
     def __init__(
         self,
@@ -207,6 +224,7 @@ class Monster:
         self.max_health = max_health
         self.health = max_health
         self.is_alive = True
+        self.death_timer = 0
         self.damage_calculator = damage_calculator or StandardDamageCalculator()
 
     def take_damage(self, weapon_type: str, base_damage: float):
@@ -217,6 +235,7 @@ class Monster:
         self.health = max(0.0, self.health - final_damage)
         if self.health == 0:
             self.is_alive = False
+            self.death_timer = self.DEATH_LINGER_FRAMES
 
     def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
         """Polymorphic update hook safe for any Monster subtype (LSP)."""
@@ -348,8 +367,242 @@ class ShooterMonster(Monster, Movable, Shootable):
             self.shoot(enemy_bullets)
 
 
+# ----------------------------------------------------------
+# 5bis. New for this workshop: Zombie (Graveyard) & Chicken (Forest)
+# ----------------------------------------------------------
+class ZombieMonster(Monster, Movable):
+    """Graveyard monster that wanders, charges the player, and damages on contact."""
+
+    def __init__(self, x: int, y: int, speed_x: int = 2):
+        super().__init__(x=x, y=y, label="Zombie", max_health=120.0,
+                          damage_calculator=WeaponResistantCalculator(resistant_to="bullet", multiplier=0.7))
+        self.speed = speed_x
+        self.direction_x = 0
+        self.direction_y = 0
+        self.direction_timer = 0
+        self.attack_timer = random.randint(120, 300)
+        self.is_charging = False
+        self.charge_timer = 0
+        self.contact_cooldown = 0
+
+    def move(
+        self,
+        screen_width: int,
+        screen_height: int = SCREEN_HEIGHT,
+        player: Player = None,
+    ):
+        if self.is_charging and player is not None:
+            dx = player.rect.centerx - self.rect.centerx
+            dy = player.rect.centery - self.rect.centery
+            distance = math.hypot(dx, dy)
+            if distance:
+                charge_speed = self.speed * 2
+                self.rect.x += round(dx / distance * charge_speed)
+                self.rect.y += round(dy / distance * charge_speed)
+                self.rect.clamp_ip(pygame.Rect(0, 0, screen_width, screen_height))
+            return
+
+        if self.direction_timer <= 0:
+            self.direction_x, self.direction_y = random.choice(
+                [
+                    (-1, -1), (0, -1), (1, -1),
+                    (-1, 0),             (1, 0),
+                    (-1, 1),  (0, 1),  (1, 1),
+                ]
+            )
+            self.direction_timer = random.randint(30, 90)
+
+        self.rect.x += self.direction_x * self.speed
+        self.rect.y += self.direction_y * self.speed
+        self.rect.clamp_ip(pygame.Rect(0, 0, screen_width, screen_height))
+        if self.rect.left == 0 and self.direction_x < 0:
+            self.direction_x *= -1
+        elif self.rect.right == screen_width and self.direction_x > 0:
+            self.direction_x *= -1
+        if self.rect.top == 0 and self.direction_y < 0:
+            self.direction_y *= -1
+        elif self.rect.bottom == screen_height and self.direction_y > 0:
+            self.direction_y *= -1
+        self.direction_timer -= 1
+
+    def finish_attack(self):
+        self.is_charging = False
+        self.charge_timer = 0
+        self.attack_timer = random.randint(120, 300)
+        self.direction_timer = 0
+
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list, player: Player = None):
+        if not self.is_alive:
+            return
+
+        if self.contact_cooldown > 0:
+            self.contact_cooldown -= 1
+
+        if not self.is_charging:
+            self.attack_timer -= 1
+            if self.attack_timer <= 0 and player is not None:
+                self.is_charging = True
+                self.charge_timer = 120
+
+        self.move(screen_width, screen_height, player)
+        if self.is_charging:
+            self.charge_timer -= 1
+            if self.charge_timer <= 0:
+                self.finish_attack()
+
+
+class ChickenMonster(Monster, Movable, Shootable):
+    """Forest-world monster: fast and fragile, throws eggs at the player."""
+
+    # Stay on screen a little after dying so the View can show chicken-die.png.
+    DEATH_LINGER_FRAMES = 40
+
+    def __init__(self, x: int, y: int, speed_x: int = 5):
+        super().__init__(x=x, y=y, label="Chicken", max_health=60.0,
+                          damage_calculator=StandardDamageCalculator())
+        self.speed_x = speed_x
+        self.throw_cooldown = 100
+
+    def move(self, screen_width: int):
+        self.rect.x += self.speed_x
+        if self.rect.right >= screen_width or self.rect.left <= 0:
+            self.speed_x *= -1
+
+    def shoot(self, enemy_bullets: list):
+        """'Shoot' here means throw an egg - same Shootable contract as
+        ShooterMonster, just a different projectile kind."""
+        self.throw_cooldown -= 1
+        if self.throw_cooldown <= 0:
+            enemy_bullets.append(EnemyBullet(self.rect.centerx, self.rect.bottom, kind="egg"))
+            self.throw_cooldown = 100
+
+    def update(self, screen_width: int, screen_height: int, enemy_bullets: list):
+        if self.is_alive:
+            self.move(screen_width)
+            self.shoot(enemy_bullets)
+
+
 # ==========================================================
-# 6. GameWorld: all game logic for one frame (the "M" of MVC)
+# 6. Factory Method: create a monster by name, on demand
+# ==========================================================
+class MonsterFactory:
+    """Centralizes monster creation. Both the starting roster and any
+    monster spawned later in the level go through create_monster(), so
+    adding a new kind never means touching GameWorld's logic."""
+
+    _REGISTRY = {
+        "normal": NormalMonster,
+        "fast": FastMonster,
+        "flying": FlyingMonster,
+        "strong": StrongMonster,
+        "immobile": ImmobileMonster,
+        "shooter": ShooterMonster,
+        "zombie": ZombieMonster,
+        "chicken": ChickenMonster,
+    }
+
+    @staticmethod
+    def create_monster(kind: str, x: int, y: int) -> Monster:
+        monster_cls = MonsterFactory._REGISTRY.get(kind.lower())
+        if monster_cls is None:
+            raise ValueError(f"MonsterFactory cannot create unknown kind: {kind}")
+        return monster_cls(x, y)
+
+
+# ==========================================================
+# 7. Abstract Factory: a "world" is a family of compatible pieces
+# ==========================================================
+class WorldFactory(ABC):
+    """A world bundles the one monster kind that belongs in it and the
+    background that goes with it. Two worlds never mix their monsters."""
+
+    name: str = "world"
+    monster_kind: str = "normal"
+    background_key: str = "forest"
+
+    def create_monster(self, x: int, y: int) -> Monster:
+        """Delegates to the Factory Method above - an Abstract Factory
+        is free to build on top of another creational pattern."""
+        return MonsterFactory.create_monster(self.monster_kind, x, y)
+
+
+class GraveyardWorldFactory(WorldFactory):
+    name = "graveyard"
+    monster_kind = "zombie"
+    background_key = "graveyard"
+
+
+class ForestWorldFactory(WorldFactory):
+    name = "forest"
+    monster_kind = "chicken"
+    background_key = "forest"
+
+
+class ClassicWorldFactory(WorldFactory):
+    name = "classic"
+    monster_kind = "normal"
+    background_key = "classic"
+
+
+WORLD_FACTORIES = {
+    "classic": ClassicWorldFactory(),
+    "graveyard": GraveyardWorldFactory(),
+    "forest": ForestWorldFactory(),
+}
+
+
+# ==========================================================
+# 8. Builder: assemble a level step by step from a WorldFactory
+# ==========================================================
+class Level:
+    """The finished product of a LevelBuilder: a background key and a
+    ready-to-use list of monsters."""
+
+    def __init__(self):
+        self.background_key: str = "forest"
+        self.monsters: list = []
+
+
+class LevelBuilder:
+    """Builds a Level one step at a time (background, then monsters),
+    exactly like Part 4's Story/Builder exercise."""
+
+    # Fixed spawn points shared by every world, so levels stay comparable.
+    SPAWN_POINTS = [(460, 35), (120, 95), (680, 155), (320, 120), (760, 60), (200, 200)]
+
+    def __init__(self):
+        self._level = Level()
+
+    def reset(self):
+        self._level = Level()
+        return self
+
+    def set_background(self, factory: WorldFactory):
+        self._level.background_key = factory.background_key
+        return self
+
+    def add_monsters(self, factory: WorldFactory, positions=None):
+        for (x, y) in (positions or self.SPAWN_POINTS):
+            self._level.monsters.append(factory.create_monster(x, y))
+        return self
+
+    def get_level(self) -> Level:
+        return self._level
+
+
+class LevelDirector:
+    """Knows the recipe: background first, then the monster roster."""
+
+    def __init__(self, builder: LevelBuilder):
+        self.builder = builder
+
+    def construct(self, factory: WorldFactory) -> Level:
+        self.builder.reset().set_background(factory).add_monsters(factory)
+        return self.builder.get_level()
+
+
+# ==========================================================
+# 9. GameWorld: all game logic for one frame (the "M" of MVC)
 # ==========================================================
 class GameWorld:
     """Holds every game object and the rules that update them each frame.
@@ -357,44 +610,103 @@ class GameWorld:
     Produces a list of event names (strings) so the View/Controller can
     react (e.g. play a sound) without the Model depending on audio."""
 
+    # A new monster of the current world is spawned this often (Factory
+    # Method in action during play, not just at level start).
+    SPAWN_INTERVAL_FRAMES = 240
+
     def __init__(self, width: int = SCREEN_WIDTH, height: int = SCREEN_HEIGHT):
         self.width = width
         self.height = height
         self.player: Player = None
-        self.monsters: list[Monster] = []
-        self.bullets: list[Bullet] = []
-        self.enemy_bullets: list[EnemyBullet] = []
+        self.monsters: list = []
+        self.bullets: list = []
+        self.enemy_bullets: list = []
         self.score = 0
-        self.status = "playing"  # or "game_over"
-        self.reset()
+        self.status = "menu"  # "menu", "playing", or "game_over"
+        self.current_world = None
+        self.spawn_timer = self.SPAWN_INTERVAL_FRAMES
 
-    def reset(self):
-        """(Re)initialize player, monsters, projectiles and score."""
+    def set_world(self, world_name: str):
+        """Rebuild the whole level for the given world, using the
+        Builder (LevelDirector + LevelBuilder) on top of that world's
+        Abstract Factory."""
+        factory = WORLD_FACTORIES[world_name]
+        level = LevelDirector(LevelBuilder()).construct(factory)
+
+        self.current_world = world_name
         self.player = Player(x=460, y=490)
-        self.monsters = [
-            ImmobileMonster(x=460, y=35),
-            NormalMonster(x=120, y=95),
-            FastMonster(x=680, y=155),
-            FlyingMonster(x=320, y=120),
-            StrongMonster(x=760, y=60),
-            ShooterMonster(x=200, y=200),
-        ]
+        self.monsters = level.monsters
         self.bullets.clear()
         self.enemy_bullets.clear()
         self.score = 0
         self.status = "playing"
+        self.spawn_timer = self.SPAWN_INTERVAL_FRAMES
+
+    def reset(self):
+        """Restart the current world (used by the Controller's 'R' key)."""
+        self.set_world(self.current_world)
+
+    def _spawn_extra_monster(self):
+        """Factory Method used again mid-game: a fresh monster of the
+        active world's kind appears at a random edge position."""
+        factory = WORLD_FACTORIES[self.current_world]
+        x = random.choice([40, self.width - 40 - Monster.WIDTH])
+        y = random.randint(40, self.height // 2)
+        self.monsters.append(factory.create_monster(x, y))
 
     def update(self) -> list:
         """Advance the world by one frame. Returns a list of event names
-        such as 'monster_killed', 'player_hit', 'player_died'."""
+        such as 'chicken_hit', 'chicken_killed', 'chicken_throw',
+        'zombie_hit', 'zombie_killed', 'player_hit', 'player_died'."""
         events = []
 
         if self.status != "playing":
             return events
 
-        # Update all monsters polymorphically (LSP)
+        # Occasionally spawn a new monster of the current world's kind.
+        self.spawn_timer -= 1
+        if self.spawn_timer <= 0:
+            self._spawn_extra_monster()
+            self.spawn_timer = self.SPAWN_INTERVAL_FRAMES
+
+        # Update all monsters polymorphically (LSP); dead ones just tick
+        # down their death_timer (if any) instead of acting.
+        enemy_bullets_before = len(self.enemy_bullets)
         for monster in self.monsters:
-            monster.update(self.width, self.height, self.enemy_bullets)
+            if monster.is_alive:
+                if isinstance(monster, ZombieMonster):
+                    monster.update(self.width, self.height, self.enemy_bullets, self.player)
+                else:
+                    monster.update(self.width, self.height, self.enemy_bullets)
+            elif monster.death_timer > 0:
+                monster.death_timer -= 1
+
+        # Any enemy bullet that appeared this frame was just thrown/fired.
+        for new_bullet in self.enemy_bullets[enemy_bullets_before:]:
+            if new_bullet.kind == "egg":
+                events.append("chicken_throw")
+
+        # Drop fully-expired dead monsters from the world.
+        self.monsters = [m for m in self.monsters if m.is_alive or m.death_timer > 0]
+
+        # A zombie touching the player deals the same damage as a projectile hit.
+        for monster in self.monsters:
+            if (
+                isinstance(monster, ZombieMonster)
+                and monster.is_alive
+                and self.player.is_alive
+                and monster.rect.colliderect(self.player.rect)
+            ):
+                if monster.is_charging:
+                    monster.finish_attack()
+                if monster.contact_cooldown == 0:
+                    self.player.take_damage(20)
+                    monster.contact_cooldown = 45
+                    events.append("player_hit")
+                    if not self.player.is_alive:
+                        self.status = "game_over"
+                        events.append("player_died")
+                    break
 
         # Update player bullets and check collisions with monsters
         for bullet in self.bullets[:]:
@@ -409,9 +721,12 @@ class GameWorld:
                     bullet.is_active = False
                     if bullet in self.bullets:
                         self.bullets.remove(bullet)
+                    tag = monster.label.lower()
                     if not monster.is_alive:
                         self.score += int(monster.max_health)
-                        events.append("monster_killed")
+                        events.append(f"{tag}_killed")
+                    else:
+                        events.append(f"{tag}_hit")
                     break
 
         # Update enemy bullets and check collisions with the player

@@ -12,18 +12,29 @@ or in model.py needs to change.
 """
 import os
 import pygame
-from model import Shieldable
+from model import Shieldable, ZombieMonster, ChickenMonster
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
 PLAYER_IMAGE_PATH = os.path.join(ASSETS_DIR, "player", "player.png")
 MONSTER_IMAGE_PATH = os.path.join(ASSETS_DIR, "monsters", "monster.png")
+ZOMBIE_IMAGE_PATH = os.path.join(ASSETS_DIR, "monsters", "zombie.png")
+CHICKEN_IMAGE_PATH = os.path.join(ASSETS_DIR, "monsters", "chicken.png")
+CHICKEN_DIE_IMAGE_PATH = os.path.join(ASSETS_DIR, "monsters", "chicken-die.png")
+
 BULLET_IMAGE_PATH = os.path.join(ASSETS_DIR, "bullets", "bulet.png")
-BACKGROUND_IMAGE_PATH = os.path.join(ASSETS_DIR, "backgrounds", "background.jpg")
+EGG_IMAGE_PATH = os.path.join(ASSETS_DIR, "bullets", "egg.png")
+
+FOREST_BACKGROUND_PATH = os.path.join(ASSETS_DIR, "backgrounds", "background_forest.jpg")
+GRAVEYARD_BACKGROUND_PATH = os.path.join(ASSETS_DIR, "backgrounds", "background_graveyard.jpg")
+CLASSIC_BACKGROUND_PATH = os.path.join(ASSETS_DIR, "backgrounds", "background.jpg")
 
 SHOOT_SOUND_PATH = os.path.join(ASSETS_DIR, "sounds", "shoot.mp3")
-DIE_SOUND_PATH = os.path.join(ASSETS_DIR, "sounds", "die.mp3")
+CHICKEN_HIT_SOUND_PATH = os.path.join(ASSETS_DIR, "sounds", "chicken_death.mp3")
+CHICKEN_DEATH_SOUND_PATH = os.path.join(ASSETS_DIR, "sounds", "chicken_death.mp3")
+EGG_THROW_SOUND_PATH = os.path.join(ASSETS_DIR, "sounds", "pop.mp3")
+ZOMBIE_SOUND_PATH = os.path.join(ASSETS_DIR, "sounds", "zombie_sound.mp3")
 MUSIC_PATH = os.path.join(ASSETS_DIR, "sounds", "music.mp3")
 
 # Colors (RGB)
@@ -43,24 +54,45 @@ class GameRenderer:
         self.width = width
         self.height = height
 
-        # --- Images (raw, unscaled - scaled per entity at draw time) ---
-        self.background = pygame.image.load(BACKGROUND_IMAGE_PATH).convert()
-        self.background = pygame.transform.scale(self.background, (width, height))
+        # --- Backgrounds, one per world (chosen in draw_background) ---
+        self.backgrounds = {
+            "classic": self._load_background(CLASSIC_BACKGROUND_PATH),
+            "forest": self._load_background(FOREST_BACKGROUND_PATH),
+            "graveyard": self._load_background(GRAVEYARD_BACKGROUND_PATH),
+        }
 
+        # --- Sprites (raw, unscaled - scaled per entity at draw time) ---
         self.player_image = pygame.image.load(PLAYER_IMAGE_PATH).convert_alpha()
         self.monster_image = pygame.image.load(MONSTER_IMAGE_PATH).convert_alpha()
+        self.zombie_image = pygame.image.load(ZOMBIE_IMAGE_PATH).convert_alpha()
+        self.chicken_image = pygame.image.load(CHICKEN_IMAGE_PATH).convert_alpha()
+        self.chicken_die_image = pygame.image.load(CHICKEN_DIE_IMAGE_PATH).convert_alpha()
+
         self.bullet_image = pygame.image.load(BULLET_IMAGE_PATH).convert_alpha()
+        self.egg_image = pygame.image.load(EGG_IMAGE_PATH).convert_alpha()
 
         # --- Sounds ---
-        self.shoot_sound = pygame.mixer.Sound(SHOOT_SOUND_PATH)
-        self.shoot_sound.set_volume(0.5)
-        self.die_sound = pygame.mixer.Sound(DIE_SOUND_PATH)
-        self.die_sound.set_volume(0.7)
+        self.shoot_sound = self._load_sound(SHOOT_SOUND_PATH, 0.5)
+        self.chicken_hit_sound = self._load_sound(CHICKEN_HIT_SOUND_PATH, 0.6)
+        self.chicken_death_sound = self._load_sound(CHICKEN_DEATH_SOUND_PATH, 0.7)
+        self.egg_throw_sound = self._load_sound(EGG_THROW_SOUND_PATH, 0.6)
+        self.zombie_sound = self._load_sound(ZOMBIE_SOUND_PATH, 0.6)
 
         # --- Fonts ---
         self.label_font = pygame.font.SysFont("arial", 13, bold=True)
         self.panel_font = pygame.font.SysFont("arial", 18, bold=True)
         self.overlay_font = pygame.font.SysFont("arial", 36, bold=True)
+        self.menu_option_font = pygame.font.SysFont("arial", 24, bold=True)
+
+    def _load_background(self, path):
+        image = pygame.image.load(path).convert()
+        return pygame.transform.scale(image, (self.width, self.height))
+
+    @staticmethod
+    def _load_sound(path, volume):
+        sound = pygame.mixer.Sound(path)
+        sound.set_volume(volume)
+        return sound
 
     # --- Music ---
     def play_music(self):
@@ -76,34 +108,55 @@ class GameRenderer:
         self.shoot_sound.play()
 
     def play_event_sounds(self, events: list):
-        if "monster_killed" in events or "player_died" in events:
-            self.die_sound.play()
+        """Each event name coming out of GameWorld.update() maps to at
+        most one sound here - the Model never touches pygame.mixer."""
+        if "chicken_throw" in events:
+            self.egg_throw_sound.play()
+        if "chicken_hit" in events:
+            self.chicken_hit_sound.play()
+        if "chicken_killed" in events:
+            self.chicken_death_sound.play()
+        if "zombie_killed" in events:
+            self.zombie_sound.play()
 
     # --- Drawing ---
-    def draw_background(self):
-        self.screen.blit(self.background, (0, 0))
+    def draw_background(self, world):
+        self.screen.blit(self.backgrounds[world.current_world], (0, 0))
 
     def draw_player(self, player):
         if player.is_alive:
             sprite = pygame.transform.scale(self.player_image, player.rect.size)
             self.screen.blit(sprite, player.rect)
 
-    def draw_monster(self, monster):
-        if not monster.is_alive:
-            return
-        sprite = pygame.transform.scale(self.monster_image, monster.rect.size)
-        self.screen.blit(sprite, monster.rect)
+    def _sprite_for(self, monster):
+        if isinstance(monster, ZombieMonster):
+            return self.zombie_image
+        if isinstance(monster, ChickenMonster):
+            return self.chicken_image
+        return self.monster_image
 
-        if isinstance(monster, Shieldable) and monster.has_active_shield():
-            pygame.draw.ellipse(self.screen, CYAN, monster.rect.inflate(10, 10), width=2)
+    def draw_monster(self, monster):
+        if monster.is_alive:
+            sprite = pygame.transform.scale(self._sprite_for(monster), monster.rect.size)
+            self.screen.blit(sprite, monster.rect)
+            if isinstance(monster, Shieldable) and monster.has_active_shield():
+                pygame.draw.ellipse(self.screen, CYAN, monster.rect.inflate(10, 10), width=2)
+        elif isinstance(monster, ChickenMonster) and monster.death_timer > 0:
+            # Lingers for a moment showing the "plucked" sprite, then vanishes.
+            sprite = pygame.transform.scale(self.chicken_die_image, monster.rect.size)
+            self.screen.blit(sprite, monster.rect)
 
     def draw_bullet(self, bullet):
         sprite = pygame.transform.scale(self.bullet_image, bullet.rect.size)
         self.screen.blit(sprite, bullet.rect)
 
     def draw_enemy_bullet(self, enemy_bullet):
-        # No dedicated sprite for enemy projectiles: a simple shape is enough.
-        pygame.draw.rect(self.screen, ORANGE, enemy_bullet.rect, border_radius=4)
+        if enemy_bullet.kind == "egg":
+            sprite = pygame.transform.scale(self.egg_image, enemy_bullet.rect.size)
+            self.screen.blit(sprite, enemy_bullet.rect)
+        else:
+            # No dedicated sprite for this projectile kind: a plain shape is enough.
+            pygame.draw.rect(self.screen, ORANGE, enemy_bullet.rect, border_radius=4)
 
     def draw_health_bar(self, entity):
         if not entity.is_alive:
@@ -125,14 +178,15 @@ class GameRenderer:
         pygame.draw.rect(self.screen, DARK_GRAY, (bar_x, bar_y, bar_width, bar_height), width=1)
 
     def draw_info_panel(self, world):
-        """Top-left panel: score, player health, and game status."""
+        """Top-left panel: score, player health, world and game status."""
         status_text = "Playing" if world.status == "playing" else "Game Over"
         lines = [
+            f"World: {world.current_world.capitalize()}",
             f"Score: {world.score}",
             f"Health: {int(world.player.health)}/{int(world.player.max_health)}",
             f"Status: {status_text}",
         ]
-        panel_width, line_height, padding = 180, 22, 8
+        panel_width, line_height, padding = 200, 22, 8
         panel_height = len(lines) * line_height + padding
         panel = pygame.Surface((panel_width, panel_height))
         panel.set_alpha(160)
@@ -148,9 +202,35 @@ class GameRenderer:
         text_rect = text.get_rect(center=(self.width // 2, self.height // 2))
         self.screen.blit(text, text_rect)
 
+    def draw_world_selection(self):
+        self.screen.blit(self.backgrounds["classic"], (0, 0))
+
+        panel = pygame.Surface((540, 330))
+        panel.set_alpha(205)
+        panel.fill(DARK_GRAY)
+        panel_rect = panel.get_rect(center=(self.width // 2, self.height // 2))
+        self.screen.blit(panel, panel_rect)
+
+        title = self.overlay_font.render("Choose Your World", True, WHITE)
+        self.screen.blit(title, title.get_rect(center=(self.width // 2, panel_rect.y + 55)))
+
+        subtitle = self.panel_font.render("Press a number to start playing", True, WHITE)
+        self.screen.blit(subtitle, subtitle.get_rect(center=(self.width // 2, panel_rect.y + 112)))
+
+        options = (
+            "1 - Forest (Chickens)",
+            "2 - Graveyard (Zombies)",
+            "3 - Classic (Monsters)",
+        )
+        for index, option in enumerate(options):
+            text = self.menu_option_font.render(option, True, WHITE)
+            self.screen.blit(text, text.get_rect(center=(self.width // 2, panel_rect.y + 170 + index * 45)))
+
+        pygame.display.flip()
+
     def draw(self, world):
         """Draw one full frame from the current state of the GameWorld."""
-        self.draw_background()
+        self.draw_background(world)
 
         self.draw_player(world.player)
         self.draw_health_bar(world.player)
